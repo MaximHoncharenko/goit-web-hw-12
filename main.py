@@ -32,6 +32,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 # **Функція для отримання БД-сесії**
 def get_db():
@@ -41,10 +42,17 @@ def get_db():
     finally:
         db.close()
 
-# **Функція для створення токена**
+# **Функція для створення токена доступу (access token)**
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+# **Функція для створення refresh токена**
+def create_refresh_token(data: dict, expires_delta: timedelta | None = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -68,20 +76,39 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(lambda:
 # **Реєстрація користувача**
 @app.post("/register/")
 def register_user(email: str, password: str, db: Session = Depends(get_db)):
+    db_user = db.query(models.User).filter(models.User.email == email).first()
+    if db_user:
+        raise HTTPException(status_code=409, detail="Email already registered")
+    
     hashed_password = pwd_context.hash(password)
     db_user = models.User(email=email, hashed_password=hashed_password)
     db.add(db_user)
     db.commit()
     return {"message": "User registered successfully"}
 
-# **Авторизація користувача**
+# **Авторизація користувача (отримання access token)**
 @app.post("/login/")
 def login(email: str, password: str, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user or not pwd_context.verify(password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    access_token = create_access_token(data={"sub": user.email}, expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    access_token = create_access_token(data={"sub": user.email})
+    refresh_token = create_refresh_token(data={"sub": user.email})
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+
+# **Оновлення access токену за допомогою refresh токену**
+@app.post("/refresh/")
+def refresh_token(refresh_token: str, db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    access_token = create_access_token(data={"sub": email})
     return {"access_token": access_token, "token_type": "bearer"}
 
 # **Створення нового контакту**
