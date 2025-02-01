@@ -74,17 +74,21 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(lambda:
     return user
 
 # **Реєстрація користувача**
-@app.post("/register/")
+@app.post("/register/", status_code=status.HTTP_201_CREATED)
 def register_user(email: str, password: str, db: Session = Depends(get_db)):
+    # Перевірка, чи вже існує користувач з таким email
     db_user = db.query(models.User).filter(models.User.email == email).first()
     if db_user:
-        raise HTTPException(status_code=409, detail="Email already registered")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     
+    # Хешування пароля
     hashed_password = pwd_context.hash(password)
     db_user = models.User(email=email, hashed_password=hashed_password)
     db.add(db_user)
     db.commit()
-    return {"message": "User registered successfully"}
+    db.refresh(db_user)
+    return {"id": db_user.id, "email": db_user.email}
+
 
 # **Авторизація користувача (отримання access token)**
 @app.post("/login/")
