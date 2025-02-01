@@ -1,14 +1,29 @@
-from sqlalchemy import Column, Integer, String, Date, Text
+from sqlalchemy import Column, Integer, String, Date, Text, ForeignKey, DateTime
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship
+from datetime import datetime
 from pydantic import BaseModel
 from datetime import date
 
 # Базовий клас для всіх моделей
 Base = declarative_base()
 
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Зв'язок один-до-багатьох з контактами
+    contacts = relationship("Contact", back_populates="owner")
+
+
 # Описуємо модель для таблиці "contacts"
 class Contact(Base):
-    __tablename__ = 'contacts'  # Назва таблиці в базі даних
+    __tablename__ = "contacts"  # Назва таблиці в базі даних
 
     # Опис полів таблиці
     id = Column(Integer, primary_key=True, index=True)  # Унікальний ідентифікатор
@@ -19,7 +34,12 @@ class Contact(Base):
     birthday = Column(Date)  # Дата народження контакту
     additional_info = Column(Text, nullable=True)  # Додаткові дані (необов'язкові)
 
+    # Нове поле для зв’язку контакту з користувачем
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    owner = relationship("User", back_populates="contacts")  # Власник контакту
 
+
+# Відповідь API для контактів
 class ContactResponse(BaseModel):
     id: int
     first_name: str
